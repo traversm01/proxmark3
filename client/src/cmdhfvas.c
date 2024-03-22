@@ -41,61 +41,61 @@
 #include "mbedtls/ecc_point_compression.h"
 #include "mbedtls/gcm.h"
 
-static const iso14a_polling_frame_t WUPA_FRAME = {
+static const iso14a_polling_frame_t WUPA_FRAME = { //ISO14443 Type A Polling frame
     .frame = { 0x52 },
     .frame_length = 1,
     .last_byte_bits = 7,
     .extra_delay = 0,
 };
 
-static const iso14a_polling_frame_t ECP_VAS_ONLY_FRAME = {
+static const iso14a_polling_frame_t ECP_VAS_ONLY_FRAME = { //ISO14443 Type A Polling frame for VAS only
     .frame = {0x6a, 0x01, 0x00, 0x00, 0x02, 0xe4, 0xd2},
     .frame_length = 7,
     .last_byte_bits = 8,
     .extra_delay = 0,
 };
 
-uint8_t aid[] = { 0x4f, 0x53, 0x45, 0x2e, 0x56, 0x41, 0x53, 0x2e, 0x30, 0x31 };
-uint8_t getVasUrlOnlyP2 = 0x00;
-uint8_t getVasFullReqP2 = 0x01;
+uint8_t aid[] = { 0x4f, 0x53, 0x45, 0x2e, 0x56, 0x41, 0x53, 0x2e, 0x30, 0x31 }; // OSE.VAS.01 in HEX
+uint8_t getVasUrlOnlyP2 = 0x00; // VAS URL only mode
+uint8_t getVasFullReqP2 = 0x01; // VAS full mode
 
-static int ParseSelectVASResponse(const uint8_t *response, size_t resLen, bool verbose) {
-    struct tlvdb *tlvRoot = tlvdb_parse_multi(response, resLen);
+static int ParseSelectVASResponse(const uint8_t *response, size_t resLen, bool verbose) { // Interpret the response from sending the aid
+    struct tlvdb *tlvRoot = tlvdb_parse_multi(response, resLen); 
 
-    const struct tlvdb *versionTlv = tlvdb_find_full(tlvRoot, 0x9F21);
+    const struct tlvdb *versionTlv = tlvdb_find_full(tlvRoot, 0x9F21); //find version TLV, 0x9F21 = 40737
     if (versionTlv == NULL) {
         tlvdb_free(tlvRoot);
-        return PM3_ECARDEXCHANGE;
+        return PM3_ECARDEXCHANGE; //if version is empty, return error
     }
     const struct tlv *version = tlvdb_get_tlv(versionTlv);
     if (version->len != 2) {
         tlvdb_free(tlvRoot);
-        return PM3_ECARDEXCHANGE;
+        return PM3_ECARDEXCHANGE; //if version in not of length 2, return error
     }
     if (verbose) {
         PrintAndLogEx(INFO, "Mobile VAS application version: %d.%d", version->value[0], version->value[1]);
     }
     if (version->value[0] != 0x01 || version->value[1] != 0x00) {
         tlvdb_free(tlvRoot);
-        return PM3_ECARDEXCHANGE;
+        return PM3_ECARDEXCHANGE; //return error if version isn't 1.0
     }
 
-    const struct tlvdb *capabilitiesTlv = tlvdb_find_full(tlvRoot, 0x9F23);
+    const struct tlvdb *capabilitiesTlv = tlvdb_find_full(tlvRoot, 0x9F23); //find capabilities mask TLV, 0x9F23 = 40739
     if (capabilitiesTlv == NULL) {
         tlvdb_free(tlvRoot);
-        return PM3_ECARDEXCHANGE;
+        return PM3_ECARDEXCHANGE; //If no capabilities mask, return error
     }
-    const struct tlv *capabilities = tlvdb_get_tlv(capabilitiesTlv);
+    const struct tlv *capabilities = tlvdb_get_tlv(capabilitiesTlv); //find capabilities mask
     if (capabilities->len != 4
             || capabilities->value[0] != 0x00
             || capabilities->value[1] != 0x00
             || capabilities->value[2] != 0x00
-            || (capabilities->value[3] & 8) == 0) {
+            || (capabilities->value[3] & 8) == 0) { //If capabilities length is not 4, or values [0..2] are not zero, or value [3] is not set, free memory and return error
         tlvdb_free(tlvRoot);
         return PM3_ECARDEXCHANGE;
     }
 
-    tlvdb_free(tlvRoot);
+    tlvdb_free(tlvRoot); //if no error returned, we have the response, version, and capabilities mask!
     return PM3_SUCCESS;
 }
 
@@ -346,6 +346,14 @@ static int DecryptVASCryptogram(uint8_t *pidHash, uint8_t *cryptogram, size_t cr
     return PM3_SUCCESS;
 }
 
+static void PrintCoordinate(mbedtls_mpi *mpi) {
+    // Print the number in little-endian order (least significant limb first)
+    for (int i = mpi->n - 1; i >= 0; i--) {
+        printf("%016llx", (unsigned long long)mpi->p[i]); // Assuming each limb is a 64-bit unsigned integer
+    }
+    printf(", ");
+}
+
 static int VASReader(uint8_t *pidHash, const char *url, size_t urlLen, uint8_t *cryptogram, size_t *cryptogramLen, bool verbose) {
     clearCommandBuffer();
 
@@ -488,6 +496,74 @@ static int CmdVASReader(const char *Cmd) {
 
             res = DecryptVASCryptogram(pidhash, cryptogram, clen, &privKey, msg, &mlen, &timestamp);
             if (res == PM3_SUCCESS) {
+                PrintAndLogEx(SUCCESS, "Cryptogram... ");
+                for (int i = 0; i < clen; i++) {
+                     printf("%02X", cryptogram[i]);
+                };
+                printf("\n");
+                PrintAndLogEx(SUCCESS, "Pass ID Hash... ");
+                for (int i = 0; i < sizeof(pidhash); i++) {
+                     printf("%02X", pidhash[i]);
+                };
+                printf("\n");
+                PrintAndLogEx(SUCCESS, "===== ELLIPTIC CURVE DATA... =====");
+                PrintAndLogEx (INFO, "Curve type... ");
+                switch(privKey.grp.id) {
+                    case 0:
+                        printf("not defined \n");
+                        break;
+                    case 1:
+                        printf("Domain parameters for the 192-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        break;
+                    case 2:
+                        printf("Domain parameters for the 224-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        break;
+                    case 3:
+                        printf("Domain parameters for the 256-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        break;
+                    case 4:
+                        printf("Domain parameters for the 384-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        break;
+                    case 5:
+                        printf("Domain parameters for the 521-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        break;
+                    case 6:
+                        printf("Domain parameters for 256-bit Brainpool curve.\n");
+                        break;
+                    case 7:
+                        printf("Domain parameters for 384-bit Brainpool curve.\n");
+                        break;
+                    case 8:
+                        printf("Domain parameters for 512-bit Brainpool curve.\n");
+                        break;
+                    case 9:
+                        printf("Domain parameters for Curve25519.");
+                        break;
+                    case 10:
+                        printf("Domain parameters for 192-bit \"Koblitz\" curve.");
+                        break;
+                    case 11:
+                        printf("Domain parameters for 224-bit \"Koblitz\" curve.\n");
+                        break;
+                    case 12:
+                        printf("Domain parameters for 256-bit \"Koblitz\" curve.\n");
+                        break;
+                    case 13:
+                        printf("Domain parameters for Curve448.\n");
+                        break;
+                    case 14:
+                        printf("Domain parameters for the 128-bit curve used for NXP originality check.\n");
+                        break;
+                    default:
+                        printf("Unknown curve ID.\n");
+                }
+                PrintAndLogEx(INFO, "Public value... ");
+                PrintCoordinate(&privKey.Q.X);
+                PrintCoordinate(&privKey.Q.Y);
+                PrintCoordinate(&privKey.Q.Z);
+                printf("\n");
+                PrintAndLogEx(INFO, "");
+                
                 PrintAndLogEx(SUCCESS, "Timestamp... " _YELLOW_("%d") " (secs since Jan 1, 2001)", timestamp);
                 PrintAndLogEx(SUCCESS, "Message..... " _YELLOW_("%s"), sprint_ascii(msg, mlen));
                 // extra sleep after successfull read

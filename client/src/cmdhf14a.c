@@ -644,7 +644,7 @@ plot:
         if (continuous) {
             res = handle_hf_plot(false);
             if (res != PM3_SUCCESS) {
-                PrintAndLogEx(DEBUG, "plot failed");
+                break;
             }
         }
 
@@ -1217,6 +1217,15 @@ int ExchangeAPDU14a(uint8_t *datain, int datainlen, bool activateField, bool lea
     *dataoutlen = 0;
     bool chaining = false;
     int res;
+    PrintAndLogEx(SUCCESS, "Message being sent in HEX: ");
+                for (int i = 0; i < datainlen; i++) {
+                     printf("%02X", datain[i]);
+                };
+    if (memcmp(datain, "\x80\xCA\x01\x01\x39", 5) == 0) {
+        printf(" GET DATA command\n");
+    } else if (memcmp(datain, "\x00\xA4\x04\x00\x0A\x4F\x53\x45\x2E\x56\x41\x53\x2E\x30\x31\x00", 16) == 0) {
+        printf(" SELECT OSE.VAS.01\n");
+    }
 
     // 3 byte here - 1b framing header, 2b crc16
     if (g_apdu_in_framing_enable &&
@@ -2497,7 +2506,7 @@ int infoHF14A(bool verbose, bool do_nack_test, bool do_aid_search) {
     }
 
     if (isMifareUltralight) {
-        isMagic = detect_mf_magic(false, MF_KEY_A, 0);
+        isMagic = ((detect_mf_magic(false, MF_KEY_A, 0) & MAGIC_FLAG_NTAG21X) == MAGIC_FLAG_NTAG21X);
     }
 
     if (isMifareClassic) {
@@ -2540,15 +2549,6 @@ int infoHF14A(bool verbose, bool do_nack_test, bool do_aid_search) {
 
     PrintAndLogEx(NORMAL, "");
     if (isMifareUltralight) {
-
-        if (((isMagic & MAGIC_FLAG_GEN_1A) == MAGIC_FLAG_GEN_1A) || ((isMagic & MAGIC_FLAG_GEN_1B) == MAGIC_FLAG_GEN_1B)) {
-            PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mfu *") "` magic commands");
-        }
-
-        if ((isMagic & MAGIC_FLAG_NTAG21X) == MAGIC_FLAG_NTAG21X) {
-            PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mfu *") "` magic commands");
-        }
-
         PrintAndLogEx(HINT, "Hint: try `" _YELLOW_("hf mfu info") "`");
     }
 
@@ -2593,33 +2593,27 @@ int infoHF14A(bool verbose, bool do_nack_test, bool do_aid_search) {
 
     if (isMifareClassic) {
         if (((isMagic & MAGIC_FLAG_GEN_1A) == MAGIC_FLAG_GEN_1A) || ((isMagic & MAGIC_FLAG_GEN_1B) == MAGIC_FLAG_GEN_1B)) {
-            PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mf c*") "` magic commands");
-
-            // if GEN4 GDM in Gen1a more,  hint about it
-            if ((isMagic & MAGIC_FLAG_GDM_WUP_40) == MAGIC_FLAG_GDM_WUP_40) {
-                PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mf gdm* --gen1a") "` magic commands");
-            }
+            PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mf c*") "` commands when interacting");
         }
 
         if ((isMagic & MAGIC_FLAG_GEN_3) == MAGIC_FLAG_GEN_3) {
-            PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mf gen3*") "` magic commands");
+            PrintAndLogEx(HINT, "Hint: Use `" _YELLOW_("hf mf gen3*") "` commands when interacting");
         }
 
         if ((isMagic & MAGIC_FLAG_GEN_4GTU) == MAGIC_FLAG_GEN_4GTU) {
-            PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mf g*") "` magic commands");
+            PrintAndLogEx(HINT, "Hint: Use `" _YELLOW_("hf mf g*") "` commands when interacting");
         }
 
         if ((isMagic & MAGIC_FLAG_GDM_AUTH) == MAGIC_FLAG_GDM_AUTH) {
-            PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mf gdm*") "` magic commands");
+            PrintAndLogEx(HINT, "Hint: Use `" _YELLOW_("hf mf gdm*") "` commands when interacting");
         }
 
         if ((isMagic & MAGIC_FLAG_GEN_2) == MAGIC_FLAG_GEN_2) {
-            PrintAndLogEx(HINT, "Hint: use `" _YELLOW_("hf mf") "` commands");
+            PrintAndLogEx(HINT, "Hint: Use `" _YELLOW_("hf mf") "` commands when interacting");
         } else {
             PrintAndLogEx(HINT, "Hint: try " _YELLOW_("`hf mf`") " commands");
         }
     }
-
 
     PrintAndLogEx(NORMAL, "");
     DropField();
