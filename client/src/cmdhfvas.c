@@ -351,7 +351,6 @@ static void PrintCoordinate(mbedtls_mpi *mpi) {
     for (int i = mpi->n - 1; i >= 0; i--) {
         printf("%016llx", (unsigned long long)mpi->p[i]); // Assuming each limb is a 64-bit unsigned integer
     }
-    printf(", ");
 }
 
 static int VASReader(uint8_t *pidHash, const char *url, size_t urlLen, uint8_t *cryptogram, size_t *cryptogramLen, bool verbose) {
@@ -559,9 +558,12 @@ static int CmdVASReader(const char *Cmd) {
                 }
                 PrintAndLogEx(INFO, "Public value... ");
                 PrintCoordinate(&privKey.Q.X);
+                    printf(", ");
                 PrintCoordinate(&privKey.Q.Y);
+                    printf(", ");
                 PrintCoordinate(&privKey.Q.Z);
                 printf("\n");
+                printf("test");
                 PrintAndLogEx(INFO, "");
                 
                 PrintAndLogEx(SUCCESS, "Timestamp... " _YELLOW_("%d") " (secs since Jan 1, 2001)", timestamp);

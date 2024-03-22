@@ -1,0 +1,28 @@
+{
+	"folders": [
+		{
+			"path": "../../../FYP/mxt136"
+		},
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.cvs": "plaintext",
+			"string": "c",
+			"__locale": "c",
+			"atomic": "c",
+			"cstddef": "c",
+			"ios": "c",
+			"limits": "c",
+			"locale": "c",
+			"new": "c",
+			"variant": "c",
+			"chrono": "c",
+			"memory": "c",
+			"algorithm": "c"
+		},
+		"problems.visibility": true
+	}
+}
