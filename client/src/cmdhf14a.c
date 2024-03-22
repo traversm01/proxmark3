@@ -1218,14 +1218,16 @@ int ExchangeAPDU14a(uint8_t *datain, int datainlen, bool activateField, bool lea
     bool chaining = false;
     int res;
     PrintAndLogEx(SUCCESS, "Message being sent in HEX: ");
+        if (memcmp(datain, "\x80\xCA\x01", 3) == 0) {
+                printf(" GET DATA command - ");
+            } else if (memcmp(datain, "\x00\xA4\x04\x00\x0A\x4F\x53\x45\x2E\x56\x41\x53\x2E\x30\x31\x00", 16) == 0) {
+                printf(" SELECT OSE.VAS.01 - ");
+            }
                 for (int i = 0; i < datainlen; i++) {
                      printf("%02X", datain[i]);
                 };
-    if (memcmp(datain, "\x80\xCA\x01\x01\x39", 5) == 0) {
-        printf(" GET DATA command\n");
-    } else if (memcmp(datain, "\x00\xA4\x04\x00\x0A\x4F\x53\x45\x2E\x56\x41\x53\x2E\x30\x31\x00", 16) == 0) {
-        printf(" SELECT OSE.VAS.01\n");
-    }
+            printf("\n");
+  
 
     // 3 byte here - 1b framing header, 2b crc16
     if (g_apdu_in_framing_enable &&

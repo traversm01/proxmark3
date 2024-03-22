@@ -392,7 +392,7 @@ static int VASReader(uint8_t *pidHash, const char *url, size_t urlLen, uint8_t *
 
     uint8_t apduRes[APDU_RES_LEN] = {0};
     int apduResLen = 0;
-
+    
     s = ExchangeAPDU14a(getVasApdu, getVasApduLen, false, false, apduRes, APDU_RES_LEN, &apduResLen);
     if (s != PM3_SUCCESS) {
         PrintAndLogEx(FAILED, "Failed to send APDU");
@@ -556,15 +556,16 @@ static int CmdVASReader(const char *Cmd) {
                     default:
                         printf("Unknown curve ID.\n");
                 }
-                PrintAndLogEx(INFO, "Public value... ");
+                PrintAndLogEx(INFO, "Public value in hexadecimal... ");
+                printf("X: ");
                 PrintCoordinate(&privKey.Q.X);
                     printf(", ");
+                printf("Y: ");
                 PrintCoordinate(&privKey.Q.Y);
                     printf(", ");
+                printf("Z: ");
                 PrintCoordinate(&privKey.Q.Z);
                 printf("\n");
-                printf("test");
-                PrintAndLogEx(INFO, "");
                 
                 PrintAndLogEx(SUCCESS, "Timestamp... " _YELLOW_("%d") " (secs since Jan 1, 2001)", timestamp);
                 PrintAndLogEx(SUCCESS, "Message..... " _YELLOW_("%s"), sprint_ascii(msg, mlen));
