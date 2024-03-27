@@ -98,6 +98,19 @@ static int ParseSelectVASResponse(const uint8_t *response, size_t resLen, bool v
         return PM3_ECARDEXCHANGE; //return error if version isn't 1.0
     }
 
+const struct tlvdb *nonceTlv = tlvdb_find_full(tlvRoot, 0x9F23); //find capabilities mask TLV, 0x9F23 = 40739
+    if (nonceTlv == NULL) {
+        tlvdb_free(tlvRoot);
+        return PM3_ECARDEXCHANGE; //If no capabilities mask, return error
+    }
+    const struct tlv *nonce = tlvdb_get_tlv(nonceTlv); //find capabilities mask
+     if (nonce->len != 4) {
+        tlvdb_free(tlvRoot);
+        return PM3_ECARDEXCHANGE; //if version in not of length 2, return error
+    } else {
+        PrintAndLogEx(INFO, "---9f24[%02d] Nonce: %u", nonce->len, nonce->value);
+    }
+
     const struct tlvdb *capabilitiesTlv = tlvdb_find_full(tlvRoot, 0x9F23); //find capabilities mask TLV, 0x9F23 = 40739
     if (capabilitiesTlv == NULL) {
         tlvdb_free(tlvRoot);
@@ -112,8 +125,8 @@ static int ParseSelectVASResponse(const uint8_t *response, size_t resLen, bool v
        tlvdb_free(tlvRoot);
         return PM3_ECARDEXCHANGE;
     }
-    PrintAndLogEx(INFO, "---9f23[%02d] Mobile Capabilities Mask: %u, %u, %u, %u", capabilities->len, capabilities->value[0], capabilities->value[1], capabilities->value[2], capabilities->value[3]);
-    
+    PrintAndLogEx(INFO, "----9f23[%02d] Mobile Capabilities Mask: %u, %u, %u, %u", capabilities->len, capabilities->value[0], capabilities->value[1], capabilities->value[2], capabilities->value[3]);
+    printf("\n");
     tlvdb_free(tlvRoot); //if no error returned, we have the response, version, and capabilities mask!
     return PM3_SUCCESS;
 }
@@ -139,6 +152,7 @@ static int CreateGetVASDataCommand(const uint8_t *pidHash, const char *url, size
 
     uint8_t unknown[] = {0x9F, 0x28, 0x04, 0x00, 0x00, 0x00, 0x00};
     memcpy(reqTlv + sizeof(version), unknown, sizeof(unknown));
+    char *unknownStr = sprint_hex_inrow(unknown, 4);
 
     uint8_t terminalCapabilities[] = {0x9F, 0x26, 0x04, 0x00, 0x00, 0x00, 0x02};
     memcpy(reqTlv + sizeof(version) + sizeof(unknown), terminalCapabilities, sizeof(terminalCapabilities));
@@ -150,6 +164,7 @@ static int CreateGetVASDataCommand(const uint8_t *pidHash, const char *url, size
         reqTlv[offset + 2] = 32;
         memcpy(reqTlv + offset + 3, pidHash, 32);
     }
+    char *pidStr = sprint_hex_inrow(pidHash, 32);
 
     if (url != NULL) {
         size_t offset = sizeof(version) + sizeof(unknown) + sizeof(terminalCapabilities) + (pidHash != NULL ? 35 : 0);
@@ -169,12 +184,22 @@ static int CreateGetVASDataCommand(const uint8_t *pidHash, const char *url, size
 
     *outLen = 6 + reqTlvLen;
 
+PrintAndLogEx(INFO, "===== GET VAS DATA Command: =====");
+PrintAndLogEx(INFO, "-9f22[%02d] Protocol Version: %d.%d", sizeof(version), version[0], version[1]);
+PrintAndLogEx(INFO, "--9f25[%02d] SHA256 of Pass ID: %s", sizeof(pidStr), pidStr);
+PrintAndLogEx(INFO, "---9f26[%02d] Capabilities Mask: %u", sizeof(terminalCapabilities), *terminalCapabilities);
+PrintAndLogEx(INFO, "----9f29[%02d] Merchant Signup URL: %s", sizeof(url), *url);
+PrintAndLogEx(INFO, "-----9f2b[05] Filter: 0100000000");
+PrintAndLogEx(INFO, "------9f28[%02d] Nonce: %u", sizeof(unknownStr), unknownStr);
+printf("\n");
+
     free(reqTlv);
     return PM3_SUCCESS;
 }
 
 static int ParseGetVASDataResponse(const uint8_t *res, size_t resLen, uint8_t *cryptogram, size_t *cryptogramLen) {
     struct tlvdb *tlvRoot = tlvdb_parse_multi(res, resLen);
+    PrintAndLogEx(INFO, "GET DATA Response:");
     PrintAndLogEx(INFO, "70[54] ====== EMV Proprietary Template ======");
 
      const struct tlvdb *unknownTlvdb = tlvdb_find_full(tlvRoot, 0x9F2A);
@@ -183,10 +208,10 @@ static int ParseGetVASDataResponse(const uint8_t *res, size_t resLen, uint8_t *c
         return PM3_ECARDEXCHANGE;
     }
     const struct tlv *unknownTlv = tlvdb_get_tlv(unknownTlvdb);
+    char *unknownStr = sprint_hex_inrow(unknownTlv->value, unknownTlv->len);
     if (unknownTlv->value != NULL){
-        PrintAndLogEx(INFO, "9f2a[%02d] Unknown Tag: %d", unknownTlv->len);
+        PrintAndLogEx(INFO, "-9f2a[%02d] Unknown Tag: %s", unknownTlv->len, *unknownStr);
     }
-
 
     const struct tlvdb *cryptogramTlvdb = tlvdb_find_full(tlvRoot, 0x9F27);
     if (cryptogramTlvdb == NULL) {
@@ -194,10 +219,9 @@ static int ParseGetVASDataResponse(const uint8_t *res, size_t resLen, uint8_t *c
         return PM3_ECARDEXCHANGE;
     }
     const struct tlv *cryptogramTlv = tlvdb_get_tlv(cryptogramTlvdb);
-    PrintAndLogEx(INFO, "9f27[%02d] Cryptogram Information Data: ");
-        for(int i = 0; i < sizeof(cryptogramTlv->value); i++){
-        printf("%.2x", cryptogramTlv->value[i]);
-        }
+    char *cryptStr = sprint_hex_inrow(cryptogramTlv->value, cryptogramTlv->len);
+    PrintAndLogEx(INFO, "--9f27[%02d] Cryptogram Information Data: %s", cryptogramTlv->len, cryptStr);
+    printf("\n");
 
     memcpy(cryptogram, cryptogramTlv->value, cryptogramTlv->len);
     *cryptogramLen = cryptogramTlv->len;
@@ -530,16 +554,6 @@ static int CmdVASReader(const char *Cmd) {
 
             res = DecryptVASCryptogram(pidhash, cryptogram, clen, &privKey, msg, &mlen, &timestamp);
             if (res == PM3_SUCCESS) {
-                PrintAndLogEx(SUCCESS, "Cryptogram... ");
-                for (int i = 0; i < clen; i++) {
-                     printf("%02X", cryptogram[i]);
-                };
-                printf("\n");
-                PrintAndLogEx(SUCCESS, "Pass ID Hash... ");
-                for (int i = 0; i < sizeof(pidhash); i++) {
-                     printf("%02X", pidhash[i]);
-                };
-                printf("\n");
                 PrintAndLogEx(SUCCESS, "===== ELLIPTIC CURVE DATA... =====");
                 PrintAndLogEx (INFO, "Curve type... ");
                 switch(privKey.grp.id) {
