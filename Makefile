@@ -266,18 +266,18 @@ tarbin: newtarbin client/tarbin armsrc/tarbin bootrom/tarbin
 	$(Q)$(GZIP) proxmark3-$(platform)-bin.tar
 
 # detect if there were changes in the platform definitions, requiring a clean
-cleanifplatformchanged:
-ifeq ($(PLATFORM_CHANGED),true)
-	$(info [!] Platform definitions changed, cleaning bootrom/armsrc/recovery first...)
-	$(Q)$(MAKE) --no-print-directory -C bootrom clean
-	$(Q)$(MAKE) --no-print-directory -C armsrc clean
-	$(Q)$(MAKE) --no-print-directory -C recovery clean
-	$(Q)$(MAKE) --no-print-directory -C client clean
-	$(Q)$(MAKE) --no-print-directory -C tools/fpga_compress clean
-	$(Q)$(ECHO) CACHED_PLATFORM=$(PLATFORM) > .Makefile.options.cache
-	$(Q)$(ECHO) CACHED_PLATFORM_EXTRAS=$(PLATFORM_EXTRAS) >> .Makefile.options.cache
-	$(Q)$(ECHO) CACHED_PLATFORM_DEFS=$(PLATFORM_DEFS) >> .Makefile.options.cache
-endif
+#cleanifplatformchanged:
+# ifeq ($(PLATFORM_CHANGED),true)
+#	$(info [!] Platform definitions changed, cleaning bootrom/armsrc/recovery first...)
+# $(Q)$(MAKE) --no-print-directory -C bootrom clean
+#	$(Q)$(MAKE) --no-print-directory -C armsrc clean
+#	$(Q)$(MAKE) --no-print-directory -C recovery clean
+#	$(Q)$(MAKE) --no-print-directory -C client clean
+#	$(Q)$(MAKE) --no-print-directory -C tools/fpga_compress clean
+#	$(Q)$(ECHO) CACHED_PLATFORM=$(PLATFORM) > .Makefile.options.cache
+#	$(Q)$(ECHO) CACHED_PLATFORM_EXTRAS=$(PLATFORM_EXTRAS) >> .Makefile.options.cache
+#	$(Q)$(ECHO) CACHED_PLATFORM_DEFS=$(PLATFORM_DEFS) >> .Makefile.options.cache
+# endif
 
 # configure system to ignore PM3 device as a modem (ModemManager blacklist, effective *only* if ModemManager is not using _strict_ policy)
 # Read doc/md/ModemManager-Must-Be-Discarded.md for more info

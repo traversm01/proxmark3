@@ -64,8 +64,23 @@ uint8_t aid[] = { 0x4f, 0x53, 0x45, 0x2e, 0x56, 0x41, 0x53, 0x2e, 0x30, 0x31 }; 
 uint8_t getVasUrlOnlyP2 = 0x00; // VAS URL only mode
 uint8_t getVasFullReqP2 = 0x01; // VAS full mode
 
+static void PrintMpiDec(mbedtls_mpi *mpi, bool yellow) {
+    // Print the number in decimal form
+    if(yellow){
+    for (int i = mpi->n - 1; i >= 0; i--) {
+        unsigned long long limb = mpi->p[i];
+        printf(_YELLOW_("%llu"), limb);
+    }
+    } else {
+    for (int i = mpi->n - 1; i >= 0; i--) {
+        unsigned long long limb = mpi->p[i];
+        printf("%llu", limb);
+    }
+    }
+}
+
 static int ParseSelectVASResponse(const uint8_t *response, size_t resLen, bool verbose) { // Interpret the response from sending the aid
-    PrintAndLogEx(INFO, "SELECT VAS Response:");
+    PrintAndLogEx(INFO, "SELECT VAS APPLET RESPONSE:");
     sprint_hex(response, resLen);
     struct tlvdb *tlvRoot = tlvdb_parse_multi(response, resLen); 
     PrintAndLogEx(INFO, "6f[1d] ====== FILE CONTROL INFORMATION TEMPLATE ======");
@@ -77,9 +92,9 @@ static int ParseSelectVASResponse(const uint8_t *response, size_t resLen, bool v
     }
     const struct tlv *application = tlvdb_get_tlv(applicationTLV);
     if (application->len == sizeof(APPLEPAY) && memcmp(application->value, APPLEPAY, sizeof(APPLEPAY)) == 0) {
-        PrintAndLogEx(INFO, "-50[%02d] Application Label: ApplePay", application->len);
+        PrintAndLogEx(INFO, "-50[%02d] Application Label: " _YELLOW_("ApplePay"), application->len);
     } else {
-        PrintAndLogEx(INFO, "-50[%02d] Application Label: Google SmartTap", application->len);
+        PrintAndLogEx(INFO, "-50[%02d] Application Label: " _YELLOW_("Google SmartTap"), application->len);
     }
 
     const struct tlvdb *versionTlv = tlvdb_find_full(tlvRoot, 0x9F21); //find version TLV, 0x9F21 = 40737
@@ -92,23 +107,10 @@ static int ParseSelectVASResponse(const uint8_t *response, size_t resLen, bool v
         tlvdb_free(tlvRoot);
         return PM3_ECARDEXCHANGE; //if version in not of length 2, return error
     }
-        PrintAndLogEx(INFO, "--9f21[%02d] Mobile VAS application version: %d.%d", version->len, version->value[0], version->value[1]);
+        PrintAndLogEx(INFO, "--9f21[%02d] Mobile VAS application version: " _YELLOW_("%d.%d"), version->len, version->value[0], version->value[1]);
     if (version->value[0] != 0x01 || version->value[1] != 0x00) {
         tlvdb_free(tlvRoot);
         return PM3_ECARDEXCHANGE; //return error if version isn't 1.0
-    }
-
-const struct tlvdb *nonceTlv = tlvdb_find_full(tlvRoot, 0x9F23); //find capabilities mask TLV, 0x9F23 = 40739
-    if (nonceTlv == NULL) {
-        tlvdb_free(tlvRoot);
-        return PM3_ECARDEXCHANGE; //If no capabilities mask, return error
-    }
-    const struct tlv *nonce = tlvdb_get_tlv(nonceTlv); //find capabilities mask
-     if (nonce->len != 4) {
-        tlvdb_free(tlvRoot);
-        return PM3_ECARDEXCHANGE; //if version in not of length 2, return error
-    } else {
-        PrintAndLogEx(INFO, "---9f24[%02d] Nonce: %u", nonce->len, nonce->value);
     }
 
     const struct tlvdb *capabilitiesTlv = tlvdb_find_full(tlvRoot, 0x9F23); //find capabilities mask TLV, 0x9F23 = 40739
@@ -125,8 +127,24 @@ const struct tlvdb *nonceTlv = tlvdb_find_full(tlvRoot, 0x9F23); //find capabili
        tlvdb_free(tlvRoot);
         return PM3_ECARDEXCHANGE;
     }
-    PrintAndLogEx(INFO, "----9f23[%02d] Mobile Capabilities Mask: %u, %u, %u, %u", capabilities->len, capabilities->value[0], capabilities->value[1], capabilities->value[2], capabilities->value[3]);
+    
+    PrintAndLogEx(INFO, "---9f23[%02d] Mobile Capabilities Mask: " _YELLOW_("%02x%02x%02x%02x"), capabilities->len, capabilities->value[0], capabilities->value[1], capabilities->value[2], capabilities->value[3]);
+const struct tlvdb *nonceTlv = tlvdb_find_full(tlvRoot, 0x9F24); //find capabilities mask TLV, 0x9F23 = 40739
+    if (nonceTlv == NULL) {
+        tlvdb_free(tlvRoot);
+        return PM3_ECARDEXCHANGE; 
+    }
+    const struct tlv *nonce = tlvdb_get_tlv(nonceTlv); //find capabilities mask
+     if (nonce->len != 4) {
+        tlvdb_free(tlvRoot);
+        return PM3_ECARDEXCHANGE; //if version in not of length 2, return error
+    } else {
+        const char *nonceVal = sprint_hex_inrow(nonce->value, nonce->len);
+        PrintAndLogEx(INFO, "----9f24[%02d] Nonce: " _YELLOW_("%x"), nonce->len, nonceVal);
+    }
+
     printf("\n");
+
     tlvdb_free(tlvRoot); //if no error returned, we have the response, version, and capabilities mask!
     return PM3_SUCCESS;
 }
@@ -150,24 +168,24 @@ static int CreateGetVASDataCommand(const uint8_t *pidHash, const char *url, size
     uint8_t version[] = {0x9F, 0x22, 0x02, 0x01, 0x00};
     memcpy(reqTlv, version, sizeof(version));
 
-    uint8_t unknown[] = {0x9F, 0x28, 0x04, 0x00, 0x00, 0x00, 0x00};
-    memcpy(reqTlv + sizeof(version), unknown, sizeof(unknown));
-    char *unknownStr = sprint_hex_inrow(unknown, 4);
+    uint8_t nonce[] = {0x9F, 0x28, 0x04, 0x00, 0x00, 0x00, 0x00};
+    uint8_t nonceVal[] = {0x00, 0x00, 0x00, 0x00};
+    memcpy(reqTlv + sizeof(version), nonce, sizeof(nonce));
 
     uint8_t terminalCapabilities[] = {0x9F, 0x26, 0x04, 0x00, 0x00, 0x00, 0x02};
-    memcpy(reqTlv + sizeof(version) + sizeof(unknown), terminalCapabilities, sizeof(terminalCapabilities));
+    uint8_t terminalCapabilitiesVal[] = {0x00, 0x00, 0x00, 0x02};
+    memcpy(reqTlv + sizeof(version) + sizeof(nonce), terminalCapabilities, sizeof(terminalCapabilities));
 
     if (pidHash != NULL) {
-        size_t offset = sizeof(version) + sizeof(unknown) + sizeof(terminalCapabilities);
+        size_t offset = sizeof(version) + sizeof(nonce) + sizeof(terminalCapabilities);
         reqTlv[offset] = 0x9F;
         reqTlv[offset + 1] = 0x25;
         reqTlv[offset + 2] = 32;
         memcpy(reqTlv + offset + 3, pidHash, 32);
     }
-    char *pidStr = sprint_hex_inrow(pidHash, 32);
 
     if (url != NULL) {
-        size_t offset = sizeof(version) + sizeof(unknown) + sizeof(terminalCapabilities) + (pidHash != NULL ? 35 : 0);
+        size_t offset = sizeof(version) + sizeof(nonce) + sizeof(terminalCapabilities) + (pidHash != NULL ? 35 : 0);
         reqTlv[offset] = 0x9F;
         reqTlv[offset + 1] = 0x29;
         reqTlv[offset + 2] = urlLen;
@@ -184,14 +202,13 @@ static int CreateGetVASDataCommand(const uint8_t *pidHash, const char *url, size
 
     *outLen = 6 + reqTlvLen;
 
-PrintAndLogEx(INFO, "===== GET VAS DATA Command: =====");
-PrintAndLogEx(INFO, "-9f22[%02d] Protocol Version: %d.%d", sizeof(version), version[0], version[1]);
-PrintAndLogEx(INFO, "--9f25[%02d] SHA256 of Pass ID: %s", sizeof(pidStr), pidStr);
-PrintAndLogEx(INFO, "---9f26[%02d] Capabilities Mask: %u", sizeof(terminalCapabilities), *terminalCapabilities);
-PrintAndLogEx(INFO, "----9f29[%02d] Merchant Signup URL: %s", sizeof(url), *url);
-PrintAndLogEx(INFO, "-----9f2b[05] Filter: 0100000000");
-PrintAndLogEx(INFO, "------9f28[%02d] Nonce: %u", sizeof(unknownStr), unknownStr);
-printf("\n");
+PrintAndLogEx(INFO, "GET VAS DATA COMMAND: ");
+PrintAndLogEx(INFO, "-9f22[%02d] Protocol Version: " _YELLOW_("%d.%d"), sizeof(version), version[3], version[4]);
+PrintAndLogEx(INFO, "--9f25[%02d] SHA256 of Pass ID: " _YELLOW_("%s"), strlen((const char*)pidHash), sprint_hex_inrow(pidHash, 32));
+PrintAndLogEx(INFO, "---9f26[%02d] Capabilities Mask: " _YELLOW_("%s"), sizeof(terminalCapabilitiesVal), sprint_hex_inrow(terminalCapabilitiesVal, sizeof(terminalCapabilitiesVal)));
+PrintAndLogEx(INFO, "----9f29[%02d] Merchant Signup URL: " _YELLOW_("%s"), strlen(url), url);
+PrintAndLogEx(INFO, "-----9f2b[05] Filter: " _YELLOW_("0100000000"));
+PrintAndLogEx(INFO, "------9f28[%02d] Nonce: " _YELLOW_("%s"), sizeof(nonceVal), sprint_hex_inrow(nonceVal, sizeof(nonceVal)));
 
     free(reqTlv);
     return PM3_SUCCESS;
@@ -199,7 +216,8 @@ printf("\n");
 
 static int ParseGetVASDataResponse(const uint8_t *res, size_t resLen, uint8_t *cryptogram, size_t *cryptogramLen) {
     struct tlvdb *tlvRoot = tlvdb_parse_multi(res, resLen);
-    PrintAndLogEx(INFO, "GET DATA Response:");
+    printf("\n");
+    PrintAndLogEx(INFO, "GET VAS DATA RESPONSE:");
     PrintAndLogEx(INFO, "70[54] ====== EMV Proprietary Template ======");
 
      const struct tlvdb *unknownTlvdb = tlvdb_find_full(tlvRoot, 0x9F2A);
@@ -210,7 +228,7 @@ static int ParseGetVASDataResponse(const uint8_t *res, size_t resLen, uint8_t *c
     const struct tlv *unknownTlv = tlvdb_get_tlv(unknownTlvdb);
     char *unknownStr = sprint_hex_inrow(unknownTlv->value, unknownTlv->len);
     if (unknownTlv->value != NULL){
-        PrintAndLogEx(INFO, "-9f2a[%02d] Unknown Tag: %s", unknownTlv->len, *unknownStr);
+        PrintAndLogEx(INFO, "-9f2a[%02d] Unknown Tag: " _YELLOW_("%s"), unknownTlv->len, *unknownStr);
     }
 
     const struct tlvdb *cryptogramTlvdb = tlvdb_find_full(tlvRoot, 0x9F27);
@@ -220,7 +238,7 @@ static int ParseGetVASDataResponse(const uint8_t *res, size_t resLen, uint8_t *c
     }
     const struct tlv *cryptogramTlv = tlvdb_get_tlv(cryptogramTlvdb);
     char *cryptStr = sprint_hex_inrow(cryptogramTlv->value, cryptogramTlv->len);
-    PrintAndLogEx(INFO, "--9f27[%02d] Cryptogram Information Data: %s", cryptogramTlv->len, cryptStr);
+    PrintAndLogEx(INFO, "--9f27[%02d] Cryptogram Information Data: " _YELLOW_("%s"), cryptogramTlv->len, cryptStr);
     printf("\n");
 
     memcpy(cryptogram, cryptogramTlv->value, cryptogramTlv->len);
@@ -314,6 +332,7 @@ static int internalVasDecrypt(uint8_t *cipherText, size_t cipherTextLen, uint8_t
         PrintAndLogEx(FAILED, "ANSI X9.63 key derivation failed");
         return PM3_EINVARG;
     }
+    PrintAndLogEx(INFO, "Derivation key from ANSI X9.63: " _YELLOW_("%s"), sprint_hex_inrow(key, sizeof(key)));
 
     uint8_t iv[16] = {0};
 
@@ -323,6 +342,7 @@ static int internalVasDecrypt(uint8_t *cipherText, size_t cipherTextLen, uint8_t
         PrintAndLogEx(FAILED, "Unable to use key in GCM context");
         return PM3_EINVARG;
     }
+    PrintAndLogEx(INFO, "Cipher type being used: The AES cipher");
 
     if (mbedtls_gcm_auth_decrypt(&gcmCtx, cipherTextLen - 16, iv, sizeof(iv), gcmAad, gcmAadLen, cipherText + cipherTextLen - 16, 16, cipherText, out)) {
         PrintAndLogEx(FAILED, "Failed to perform GCM decryption");
@@ -337,15 +357,20 @@ static int internalVasDecrypt(uint8_t *cipherText, size_t cipherTextLen, uint8_t
 }
 
 static int DecryptVASCryptogram(uint8_t *pidHash, uint8_t *cryptogram, size_t cryptogramLen, mbedtls_ecp_keypair *privKey, uint8_t *out, size_t *outLen, uint32_t *timestamp) {
+    PrintAndLogEx(SUCCESS, "===== DECRYPTION OF CRYPTOGRAM =====");
     uint8_t keyHint[4] = {0};
     if (GetPrivateKeyHint(privKey, keyHint) != PM3_SUCCESS) {
         PrintAndLogEx(FAILED, "Unable to generate key hint");
         return PM3_EINVARG;
     }
+    PrintAndLogEx(INFO, "Private key hint: "_YELLOW_("%s"), sprint_hex_inrow(keyHint, 4)); //Print the key hint
+    PrintAndLogEx(INFO, "Cryptogram: "_YELLOW_("%s"), sprint_hex_inrow(cryptogram, 4)); //Print the first 4 bytes of the cryptogram
 
     if (memcmp(keyHint, cryptogram, 4) != 0) {
-        PrintAndLogEx(FAILED, "Private key does not match cryptogram");
+        PrintAndLogEx(FAILED, _RED_("Private key does not match cryptogram"));
         return PM3_EINVARG;
+    } else {
+        PrintAndLogEx(SUCCESS, _GREEN_("Private key matches cryptogram!")); 
     }
 
     mbedtls_ecp_keypair mobilePubKey;
@@ -367,6 +392,7 @@ static int DecryptVASCryptogram(uint8_t *pidHash, uint8_t *cryptogram, size_t cr
         PrintAndLogEx(FAILED, "Failed to generate ECDH shared secret");
         return PM3_EINVARG;
     }
+
     mbedtls_ecp_keypair_free(&mobilePubKey);
 
     uint8_t sharedSecretBytes[32] = {0};
@@ -375,6 +401,8 @@ static int DecryptVASCryptogram(uint8_t *pidHash, uint8_t *cryptogram, size_t cr
         PrintAndLogEx(FAILED, "Failed to generate ECDH shared secret");
         return PM3_EINVARG;
     }
+    char *hexStr = sprint_hex_inrow(sharedSecretBytes, 32);
+    PrintAndLogEx(INFO, "Shared secret in hexadecimal: " _YELLOW_("%s"), hexStr);
     mbedtls_mpi_free(&sharedSecret);
 
     uint8_t string1[27] = "ApplePay encrypted VAS data";
@@ -385,6 +413,8 @@ static int DecryptVASCryptogram(uint8_t *pidHash, uint8_t *cryptogram, size_t cr
     memcpy(method1SharedInfo + 1, string2, sizeof(string2));
     memcpy(method1SharedInfo + 1 + sizeof(string2), string1, sizeof(string1));
     memcpy(method1SharedInfo + 1 + sizeof(string2) + sizeof(string1), pidHash, 32);
+
+    PrintAndLogEx(INFO, "Offline, shared information for ANSI X9.64 KDF: " _YELLOW_("%s"), sprint_hex_inrow(method1SharedInfo, 73));
 
     uint8_t decryptedData[68] = {0};
     size_t decryptedDataLen = 0;
@@ -405,13 +435,6 @@ static int DecryptVASCryptogram(uint8_t *pidHash, uint8_t *cryptogram, size_t cr
     return PM3_SUCCESS;
 }
 
-static void PrintCoordinate(mbedtls_mpi *mpi) {
-    // Print the number in little-endian order (least significant limb first)
-    for (int i = mpi->n - 1; i >= 0; i--) {
-        printf("%016llx", (unsigned long long)mpi->p[i]); // Assuming each limb is a 64-bit unsigned integer
-    }
-}
-
 static int VASReader(uint8_t *pidHash, const char *url, size_t urlLen, uint8_t *cryptogram, size_t *cryptogramLen, bool verbose) {
     clearCommandBuffer();
 
@@ -429,7 +452,18 @@ static int VASReader(uint8_t *pidHash, const char *url, size_t urlLen, uint8_t *
     uint16_t status = 0;
     size_t resLen = 0;
     uint8_t selectResponse[APDU_RES_LEN] = {0};
+    printf("\n");
+    PrintAndLogEx(SUCCESS, "===== COMMUNICATION... =====");
+    PrintAndLogEx(INFO, "SELECT VAS APPLET COMMAND: ");
+    PrintAndLogEx(INFO, "-CLA: " _YELLOW_("00"));
+    PrintAndLogEx(INFO, "--INS: " _YELLOW_("A4"));
+    PrintAndLogEx(INFO, "---P1: " _YELLOW_("04"));
+    PrintAndLogEx(INFO, "----P2: " _YELLOW_("00"));
+    PrintAndLogEx(INFO, "----DATA: " _YELLOW_("%s"), sprint_hex_inrow(aid, sizeof(aid)));
+    PrintAndLogEx(INFO, "-----LE: " _YELLOW_("00"));
+
     Iso7816Select(CC_CONTACTLESS, false, true, aid, sizeof(aid), selectResponse, APDU_RES_LEN, &resLen, &status);
+    printf("\n");
 
     if (status != 0x9000) {
         PrintAndLogEx(FAILED, "Card doesn't support VAS");
@@ -554,68 +588,114 @@ static int CmdVASReader(const char *Cmd) {
 
             res = DecryptVASCryptogram(pidhash, cryptogram, clen, &privKey, msg, &mlen, &timestamp);
             if (res == PM3_SUCCESS) {
+                printf("\n");
                 PrintAndLogEx(SUCCESS, "===== ELLIPTIC CURVE DATA... =====");
-                PrintAndLogEx (INFO, "Curve type... ");
+                PrintAndLogEx (INFO, "Curve Domain-parameter identifiers: curve, subgroup, and generator... ");
                 switch(privKey.grp.id) {
                     case 0:
                         printf("not defined \n");
                         break;
                     case 1:
-                        printf("Domain parameters for the 192-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        printf(_YELLOW_("  Domain parameters for the 192-bit curve defined by FIPS 186-4 and SEC1.\n"));
                         break;
                     case 2:
-                        printf("Domain parameters for the 224-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        printf(_YELLOW_("  Domain parameters for the 224-bit curve defined by FIPS 186-4 and SEC1.\n"));
                         break;
                     case 3:
-                        printf("Domain parameters for the 256-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        printf(_YELLOW_("  Domain parameters for the 256-bit curve defined by FIPS 186-4 and SEC1.\n"));
                         break;
                     case 4:
-                        printf("Domain parameters for the 384-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        printf(_YELLOW_("  Domain parameters for the 384-bit curve defined by FIPS 186-4 and SEC1.\n"));
                         break;
                     case 5:
-                        printf("Domain parameters for the 521-bit curve defined by FIPS 186-4 and SEC1.\n");
+                        printf(_YELLOW_("  Domain parameters for the 521-bit curve defined by FIPS 186-4 and SEC1.\n"));
                         break;
                     case 6:
-                        printf("Domain parameters for 256-bit Brainpool curve.\n");
+                        printf(_YELLOW_("  Domain parameters for 256-bit Brainpool curve.\n"));
                         break;
                     case 7:
-                        printf("Domain parameters for 384-bit Brainpool curve.\n");
+                        printf(_YELLOW_("  Domain parameters for 384-bit Brainpool curve.\n"));
                         break;
                     case 8:
-                        printf("Domain parameters for 512-bit Brainpool curve.\n");
+                        printf(_YELLOW_("  Domain parameters for 512-bit Brainpool curve.\n"));
                         break;
                     case 9:
-                        printf("Domain parameters for Curve25519.");
+                        printf(_YELLOW_("  Domain parameters for Curve25519.\n"));
                         break;
                     case 10:
-                        printf("Domain parameters for 192-bit \"Koblitz\" curve.");
+                        printf(_YELLOW_("  Domain parameters for 192-bit \"Koblitz\" curve.\n"));
                         break;
                     case 11:
-                        printf("Domain parameters for 224-bit \"Koblitz\" curve.\n");
+                        printf(_YELLOW_("  Domain parameters for 224-bit \"Koblitz\" curve.\n"));
                         break;
                     case 12:
-                        printf("Domain parameters for 256-bit \"Koblitz\" curve.\n");
+                        printf(_YELLOW_("  Domain parameters for 256-bit \"Koblitz\" curve.\n"));
                         break;
                     case 13:
-                        printf("Domain parameters for Curve448.\n");
+                        printf(_YELLOW_("  Domain parameters for Curve448.\n"));
                         break;
                     case 14:
-                        printf("Domain parameters for the 128-bit curve used for NXP originality check.\n");
+                        printf(_YELLOW_("  Domain parameters for the 128-bit curve used for NXP originality check.\n"));
                         break;
                     default:
-                        printf("Unknown curve ID.\n");
+                        printf(_YELLOW_("  Unknown curve ID.\n"));
                 }
-                PrintAndLogEx(INFO, "Public value in hexadecimal... ");
-                printf("X: ");
-                PrintCoordinate(&privKey.Q.X);
-                    printf(", ");
-                printf("Y: ");
-                PrintCoordinate(&privKey.Q.Y);
-                    printf(", ");
-                printf("Z: ");
-                PrintCoordinate(&privKey.Q.Z);
+                PrintAndLogEx (INFO, "Curve type: " _GREEN_("a, b") "... ");
+                 switch(mbedtls_ecp_get_type(&privKey.grp)) {
+                    case 0:
+                        printf("  not defined \n");
+                        break;
+                    case 1:
+                        printf("  SHORT WEIERSTRASS: " _YELLOW_("y^2 = x^3 + a x + b\n"));
+                        break;
+                    case 2:
+                        printf("  MONTGOMERY: " _YELLOW_("y^2 = x^3 + a x^2 + x\n"));
+                        break;
+                    default:
+                        printf("  Unknown curve ID.\n");
+                }
+                PrintAndLogEx(INFO, "Our public value... ");
+                printf("  X: ");
+                PrintMpiDec(&privKey.Q.X, true);
                 printf("\n");
-                
+                printf("  Y: ");
+                PrintMpiDec(&privKey.Q.Y, true);
+                printf("\n");
+                printf("  Z: ");
+                PrintMpiDec(&privKey.Q.Z, true);
+                printf("\n");
+
+                PrintAndLogEx(INFO, "Our private value... ");
+                printf("  ");
+                PrintMpiDec(&privKey.d, true);
+                printf("\n");
+
+                PrintAndLogEx(INFO, "Prime modulus: " _GREEN_("p")"... ");
+                printf("  ");
+                PrintMpiDec(&privKey.grp.P, true);
+                printf("\n");
+
+                PrintAndLogEx(INFO, "Generator point: " _GREEN_("G")"... ");
+                printf("  X: ");
+                PrintMpiDec(&privKey.grp.G.X, true);
+                printf("\n");
+                printf("  Y: ");
+                PrintMpiDec(&privKey.grp.G.Y, true);
+                printf("\n");
+                printf("  Z: ");
+                PrintMpiDec(&privKey.grp.G.Z, true);
+                printf("\n");
+
+                PrintAndLogEx(INFO, "Order of generator point: " _GREEN_("n")"... ");
+                printf("  ");
+                PrintMpiDec(&privKey.grp.N, true);
+                printf("\n");
+
+                PrintAndLogEx(INFO, "Cofactor (internal 1 if the constants are static): " _GREEN_("h")"... ");
+                printf("  ");
+                printf(_YELLOW_("%u"), privKey.grp.h);
+                printf("\n");
+
                 PrintAndLogEx(SUCCESS, "Timestamp... " _YELLOW_("%d") " (secs since Jan 1, 2001)", timestamp);
                 PrintAndLogEx(SUCCESS, "Message..... " _YELLOW_("%s"), sprint_ascii(msg, mlen));
                 // extra sleep after successfull read

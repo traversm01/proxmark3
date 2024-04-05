@@ -1218,7 +1218,7 @@ int ExchangeAPDU14a(uint8_t *datain, int datainlen, bool activateField, bool lea
     bool chaining = false;
     int res;
     char *datainStr = sprint_hex_inrow(datain, datainlen);
-    PrintAndLogEx(SUCCESS, "Message being sent in HEX: %s", datainStr);
+    PrintAndLogEx(SUCCESS, "Message being sent in HEX: "_CYAN_("%s"), datainStr);
   
 
     // 3 byte here - 1b framing header, 2b crc16
