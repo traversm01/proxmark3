@@ -26,7 +26,9 @@
 #define HITAG_PASSWORD_SIZE     4
 #define HITAG_UID_SIZE          4
 #define HITAG_BLOCK_SIZE        4
-#define HITAG2_MAX_BYTE_SIZE    (12 * HITAG_BLOCK_SIZE)
+#define HITAG2_MAX_BLOCKS       8
+#define HITAG2_MAX_BYTE_SIZE    (HITAG2_MAX_BLOCKS * HITAG_BLOCK_SIZE)
+
 // need to see which limits these cards has
 #define HITAG1_MAX_BYTE_SIZE    64
 #define HITAGS_MAX_BYTE_SIZE    64
@@ -40,7 +42,11 @@ int CmdLFHitag(const char *Cmd);
 
 int readHitagUid(void);
 void annotateHitag1(char *exp, size_t size, const uint8_t *cmd, uint8_t cmdsize, bool is_response);
-void annotateHitag2(char *exp, size_t size, const uint8_t *cmd, uint8_t cmdsize, bool is_response);
+void annotateHitag2(char *exp, size_t size, const uint8_t *cmd, uint8_t cmdsize, uint8_t bits, bool is_response);
 void annotateHitagS(char *exp, size_t size, const uint8_t *cmd, uint8_t cmdsize, bool is_response);
+
+void annotateHitag2_init(void);
+
+
 uint8_t hitag1_CRC_check(uint8_t *d, uint32_t nbit);
 #endif

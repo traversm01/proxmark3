@@ -17,15 +17,19 @@
 //-----------------------------------------------------------------------------
 #include "cmdlfhitag.h"
 #include <ctype.h>
-#include "cmdparser.h"   // command_t
+#include "cmdparser.h"  // command_t
 #include "comms.h"
 #include "cmdtrace.h"
 #include "commonutil.h"
 #include "hitag.h"
-#include "fileutils.h"   // savefile
-#include "protocols.h"   // defines
+#include "fileutils.h"  // savefile
+#include "protocols.h"  // defines
 #include "cliparser.h"
 #include "crc.h"
+#include "graph.h"      // MAX_GRAPH_TRACE_LEN
+#include "lfdemod.h"
+#include "cmddata.h"    // setDemodBuff
+#include "pm3_cmd.h"    // return codes
 
 static int CmdHelp(const char *Cmd);
 
@@ -234,8 +238,8 @@ static void print_hitag2_configuration(uint32_t uid, uint8_t config) {
 
     PrintAndLogEx(NORMAL, "");
     PrintAndLogEx(INFO, "--- " _CYAN_("Tag Information") " ---------------------------");
-    PrintAndLogEx(SUCCESS, "UID.... " _GREEN_("%08X"), uid);
-    PrintAndLogEx(SUCCESS, "TYPE... " _GREEN_("%s"), getHitagTypeStr(uid));
+    PrintAndLogEx(SUCCESS, "UID...... " _GREEN_("%08X"), uid);
+    PrintAndLogEx(SUCCESS, "TYPE..... " _GREEN_("%s"), getHitagTypeStr(uid));
 
     char msg[100];
     memset(msg, 0, sizeof(msg));
@@ -245,11 +249,9 @@ static void print_hitag2_configuration(uint32_t uid, uint8_t config) {
     const char *bs = sprint_bytebits_bin(bits, 8);
 
     //configuration byte
-    PrintAndLogEx(SUCCESS, "");
-    PrintAndLogEx(SUCCESS, "Config byte... 0x%02X", config);
+//    PrintAndLogEx(SUCCESS, "");
+    PrintAndLogEx(SUCCESS, "Config... " _YELLOW_("0x%02X"), config);
     PrintAndLogEx(SUCCESS, "  %s", bs);
-
-
     PrintAndLogEx(SUCCESS, "  %s", sprint_breakdown_bin(C_NONE, bs, 8, 0, 4, "RFU"));
 
     if (config & 0x8) {
@@ -281,7 +283,6 @@ static void print_hitag2_configuration(uint32_t uid, uint8_t config) {
     } else {
         PrintAndLogEx(SUCCESS, "  %s", sprint_breakdown_bin(C_NONE, bs, 8, 7, 1, "Manchester"));
     }
-
 }
 
 const char *annotation[] = {
@@ -293,9 +294,9 @@ const char *annotation[] = {
 static void print_hitag2_blocks(uint8_t *d, uint16_t n) {
 
     PrintAndLogEx(INFO, "");
-    PrintAndLogEx(INFO, "-----------------------------------------------");
-    PrintAndLogEx(INFO, "block#   | data        | ascii | lck | Info");
-    PrintAndLogEx(INFO, "---------+-------------+-------+-----+---------");
+    PrintAndLogEx(INFO, "----------------------------------------------");
+    PrintAndLogEx(INFO, " #      | data        | ascii | lck | Info");
+    PrintAndLogEx(INFO, "--------+-------------+-------+-----+---------");
 
     uint8_t config = d[HITAG2_CONFIG_OFFSET];
     uint8_t blocks = (n / HITAG_BLOCK_SIZE);
@@ -356,7 +357,7 @@ static void print_hitag2_blocks(uint8_t *d, uint16_t n) {
                 break;
         }
 
-        PrintAndLogEx(INFO, "%3d/0x%02X | %s| %s  | %s  | %s"
+        PrintAndLogEx(INFO, "%2d/0x%02X | %s| %s  | %s  | %s"
                       , i
                       , i
                       , sprint_hex(d + (i * HITAG_BLOCK_SIZE), HITAG_BLOCK_SIZE)
@@ -365,64 +366,123 @@ static void print_hitag2_blocks(uint8_t *d, uint16_t n) {
                       , annotation[i]
                      );
     }
-    PrintAndLogEx(INFO, "---------+-------------+-------+-----+---------");
-    PrintAndLogEx(INFO, " L = Locked, "_GREEN_("RW") " = Read Write, R = Read Only");
+    PrintAndLogEx(INFO, "--------+-------------+-------+-----+---------");
+    PrintAndLogEx(INFO, " "_RED_("L") " = Locked, "_GREEN_("RW") " = Read Write, R = Read Only");
     PrintAndLogEx(INFO, " FI = Fixed / Irreversible");
-    PrintAndLogEx(INFO, "-----------------------------------------------");
+    PrintAndLogEx(INFO, "----------------------------------------------");
 }
 
 // Annotate HITAG protocol
 void annotateHitag1(char *exp, size_t size, const uint8_t *cmd, uint8_t cmdsize, bool is_response) {
 }
 
-void annotateHitag2(char *exp, size_t size, const uint8_t *cmd, uint8_t cmdsize, bool is_response) {
+static struct {
+    enum {
+        STATE_HALT,
+        STATE_START_AUTH,
+        STATE_AUTH,
+        STATE_ENCRYPTED,
+    } state;
+} _ht2state;
 
-    // iceman: live decrypt of trace?
-    if (is_response) {
+void annotateHitag2_init(void) {
+    _ht2state.state = STATE_HALT;
+}
 
+void annotateHitag2(char *exp, size_t size, const uint8_t *cmd, uint8_t cmdsize, uint8_t bits, bool is_response) {
 
-        uint8_t cmdbits = (cmd[0] & 0xC0) >> 6;
+    if (cmdsize == 0) {
+        return;
+    }
 
+    char *binstr = (char *)calloc((cmdsize * 8) + 1, sizeof(uint8_t));
+    if (binstr == NULL) {
+        return;
+    }
+
+    bytes_2_binstr(binstr, cmd, cmdsize);
+
+    size_t bn = strlen(binstr);
+    if (bits) {
         if (cmdsize == 1) {
-            if (cmdbits == HITAG2_START_AUTH) {
-                snprintf(exp, size, "START AUTH");
-                return;
-            }
-            if (cmdbits == HITAG2_HALT) {
-                snprintf(exp, size, "HALT");
-                return;
-            }
-        }
-
-        if (cmdsize == 3) {
-            if (cmdbits == HITAG2_START_AUTH) {
-                // C     1     C   0
-                // 1100 0 00 1 1100 000
-                uint8_t page = (cmd[0] & 0x38) >> 3;
-                uint8_t inv_page = ((cmd[0] & 0x1) << 2) | ((cmd[1] & 0xC0) >> 6);
-                snprintf(exp, size, "READ page(%x) %x", page, inv_page);
-                return;
-            }
-            if (cmdbits == HITAG2_WRITE_PAGE) {
-                uint8_t page = (cmd[0] & 0x38) >> 3;
-                uint8_t inv_page = ((cmd[0] & 0x1) << 2) | ((cmd[1] & 0xC0) >> 6);
-                snprintf(exp, size, "WRITE page(%x) %x", page, inv_page);
-                return;
-            }
-        }
-
-        if (cmdsize == 9)  {
-            snprintf(exp, size, "Nr Ar Is response");
-            return;
-        }
-    } else {
-
-        if (cmdsize == 9)  {
-            snprintf(exp, size, "Nr Ar");
-            return;
+            bn = bits;
+        } else if (cmdsize > 1) {
+             bn = ((cmdsize - 1) * 8) + bits;
         }
     }
 
+    // 11000  AUTH  only one with 5 bits.  cmdsize 1
+    switch(bn) {
+        case 5: {
+            _ht2state.state = STATE_HALT;
+            if(memcmp(binstr, HITAG2_START_AUTH, 5) == 0) {
+                snprintf(exp, size, "START AUTH");
+                _ht2state.state = STATE_START_AUTH;
+            } else {
+                snprintf(exp, size, "?");
+            }
+            break;
+        }
+        case 10: {
+
+            if (_ht2state.state == STATE_ENCRYPTED) {
+                snprintf(exp, size, "ENC CMD");
+                break;
+            }
+
+            if(memcmp(binstr, HITAG2_HALT, 2) == 0) {
+                snprintf(exp, size, "HALT");
+                _ht2state.state = STATE_HALT;
+                break;
+            }
+            if(memcmp(binstr, HITAG2_READ_PAGE, 2) == 0) {
+                snprintf(exp, size, "READ_PAGE (%u)", 0);
+                break;
+            }
+
+            if(memcmp(binstr, HITAG2_READ_PAGE_INVERTED, 2) == 0) {
+                snprintf(exp, size, "READ_PAGE_INVERTED (%u)", 0);
+                break;
+            }
+
+            if(memcmp(binstr, HITAG2_WRITE_PAGE, 2) == 0) {
+                snprintf(exp, size, "WRITE_PAGE ()");
+                break;
+            }
+            break;
+        }
+
+        case 32: {       // password or data
+            if (_ht2state.state == STATE_START_AUTH) {
+                if (is_response) {
+                    snprintf(exp, size, "UID");
+                } else  {
+                    snprintf(exp, size, "PWD: " _GREEN_("0x%02X%02X%02X%02X"), cmd[0], cmd[1], cmd[2], cmd[3]);
+                    _ht2state.state = STATE_AUTH;
+                }
+                break;
+            }
+
+            if (_ht2state.state == STATE_AUTH) {
+                snprintf(exp, size, "DATA");
+            } else{
+                snprintf(exp, size, "?");
+            }
+            break;
+        }
+
+        case 64: {       // crypto handshake
+            snprintf(exp, size, "AUTH: Nr Ar");
+            _ht2state.state = STATE_ENCRYPTED;
+            break;
+        }
+        default: {
+            snprintf(exp, size, "?");
+            break;
+        }
+    }
+
+    free(binstr);
 }
 
 void annotateHitagS(char *exp, size_t size, const uint8_t *cmd, uint8_t cmdsize, bool is_response) {
@@ -655,8 +715,13 @@ static int CmdLFHitagReader(const char *Cmd) {
     uint8_t *data = resp.data.asBytes;
     uint32_t uid = bytes_to_num(data, HITAG_UID_SIZE);
     print_hitag2_configuration(uid, data[HITAG_BLOCK_SIZE * 3]);
-    print_hex_break(data, HITAG2_MAX_BYTE_SIZE, HITAG_BLOCK_SIZE);
-    print_hitag2_paxton(data);
+
+    if (use_ht2) {
+        print_hitag2_blocks(data, HITAG2_MAX_BYTE_SIZE);
+        print_hitag2_paxton(data);
+    } else {
+        print_hex_break(data, HITAG2_MAX_BYTE_SIZE, HITAG_BLOCK_SIZE);
+    }
     return PM3_SUCCESS;
 }
 
@@ -1062,9 +1127,13 @@ static int CmdLFHitag2Dump(const char *Cmd) {
 
     // block3, 1 byte
     uint32_t uid = bytes_to_num(data, HITAG_UID_SIZE);
-    print_hitag2_configuration(uid, data[HITAG_BLOCK_SIZE * 3]);
-    print_hitag2_blocks(data, HITAG2_MAX_BYTE_SIZE);
-    print_hitag2_paxton(data);
+    if (use_ht2) {
+        print_hitag2_configuration(uid, data[HITAG_BLOCK_SIZE * 3]);
+        print_hitag2_blocks(data, HITAG2_MAX_BYTE_SIZE);
+        print_hitag2_paxton(data);
+    } else {
+        PrintAndLogEx(INFO, "No memory printing available");
+    }
 
     if (nosave) {
         PrintAndLogEx(NORMAL, "");
@@ -1291,9 +1360,9 @@ static int CmdLFHitagSim(const char *Cmd) {
 static int CmdLFHitagSniff(const char *Cmd) {
     CLIParserContext *ctx;
     CLIParserInit(&ctx, "lf hitag sniff",
-                  "Sniff traffic between Hitag reader and tag.\n"
-                  "Use " _YELLOW_("`lf hitag list`")" to view collected data.",
-                  "lf hitag sniff"
+                  "Sniff the communication between reader and tag.\n"
+                  "Use `lf hitag list` to view collected data.",
+                  " lf hitag sniff"
                  );
 
     void *argtable[] = {
@@ -1303,9 +1372,15 @@ static int CmdLFHitagSniff(const char *Cmd) {
     CLIExecWithReturn(ctx, Cmd, argtable, true);
     CLIParserFree(ctx);
 
+    PrintAndLogEx(INFO, "Press " _GREEN_("pm3 button") " to abort sniffing");
+
+    PacketResponseNG resp;
     clearCommandBuffer();
     SendCommandNG(CMD_LF_HITAG_SNIFF, NULL, 0);
-    PrintAndLogEx(HINT, "HINT: Try " _YELLOW_("`lf hitag list`")" to view collected data");
+    WaitForResponse(CMD_LF_HITAG_SNIFF, &resp);
+    PrintAndLogEx(INFO, "Done!");
+    PrintAndLogEx(HINT, "Try `" _YELLOW_("lf hitag list")"` to view captured tracelog");
+    PrintAndLogEx(HINT, "Try `" _YELLOW_("trace save -h") "` to save tracelog for later analysing");
     return PM3_SUCCESS;
 }
 
